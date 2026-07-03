@@ -16,7 +16,7 @@ else
     echo "Creating new bench..."
 fi
 
-export PATH="${NVM_DIR}/versions/node/v${NODE_VERSION_DEVELOP}/bin/:${PATH}"
+export PATH="${NVM_DIR:-}/versions/node/v${NODE_VERSION_DEVELOP:-}/bin/:${PATH}"
 
 bench init --skip-redis-config-generation frappe-bench
 
