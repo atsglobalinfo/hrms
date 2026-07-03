@@ -20,3 +20,7 @@ hrms/public/frontend
 hrms/www/hrms.html
 hrms/public/roster
 hrms/www/roster.html
+
+# legacy ATS HRMS data export - one-time migration input, contains customer PII, never commit
+atsglofj_hrms.json
+legacy_data.json
