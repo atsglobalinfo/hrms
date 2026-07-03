@@ -213,6 +213,26 @@ def ensure_warranty_reminder_script():
 	).insert(ignore_permissions=True)
 
 
+def ensure_default_address_template():
+	if frappe.db.exists("Address Template", {"is_default": 1}):
+		return
+	if frappe.db.exists("Address Template", "India"):
+		frappe.db.set_value("Address Template", "India", "is_default", 1)
+		return
+	frappe.get_doc(
+		{
+			"doctype": "Address Template",
+			"country": "India",
+			"is_default": 1,
+			"template": (
+				"{{ address_line1 }}<br>{% if address_line2 %}{{ address_line2 }}<br>{% endif %}"
+				"{{ city }}<br>{% if state %}{{ state }}<br>{% endif %}"
+				"{% if pincode %}{{ pincode }}<br>{% endif %}{{ country }}"
+			),
+		}
+	).insert(ignore_permissions=True)
+
+
 def setup(company):
 	ensure_custom_field("Employee", "custom_legacy_user_id", "Legacy User ID", unique=1, insert_after="employee_number")
 	ensure_custom_field("Employee", "custom_bank_account_holder_name", "Bank Account Holder Name", insert_after="ifsc_code")
@@ -223,16 +243,28 @@ def setup(company):
 				ignore_permissions=True
 			)
 	ensure_legacy_asset_doctype()
+	ensure_custom_field("Legacy Asset", "custom_legacy_asset_id", "Legacy Asset ID", unique=1, insert_after="mac_id")
 	ensure_company_expense_doctype()
 	ensure_warranty_reminder_script()
+	ensure_default_address_template()
 	frappe.db.commit()
+
+
+def normalize_deployed_at(value):
+	value = clean(value)
+	if not value:
+		return ""
+	normalized = value.upper().replace(" ", "-")
+	for canonical in DEPLOYED_AT:
+		if canonical.upper() == normalized:
+			return canonical
+	return ""
 
 
 # ---------- employees ----------
 
 def import_employees(tables, company):
 	bank_by_user = {r["userId"]: r for r in tables.get("bank", [])}
-	address_by_user = {r["userId"]: r for r in tables.get("address", [])}
 	legacy_map = {}
 
 	for row in tables.get("user", []):
@@ -314,25 +346,6 @@ def import_employees(tables, company):
 			emp.insert(ignore_permissions=True)
 			legacy_map[uid] = emp.name
 			bump("employees")
-
-			addr = address_by_user.get(uid)
-			if addr and (clean(addr.get("line1")) or clean(addr.get("city"))):
-				try:
-					a = frappe.new_doc("Address")
-					a.address_title = full_name
-					a.address_type = "Current"
-					a.address_line1 = clean(addr.get("line1")) or "NA"
-					a.address_line2 = clean(addr.get("line2"))
-					a.city = clean(addr.get("city")) or "NA"
-					a.state = clean(addr.get("state"))
-					a.pincode = clean(addr.get("pincode"))
-					a.country = clean(addr.get("country")) or "India"
-					a.append("links", {"link_doctype": "Employee", "link_name": emp.name})
-					a.flags.ignore_mandatory = True
-					a.insert(ignore_permissions=True)
-					bump("addresses")
-				except Exception as e:
-					log_error("addresses", f"{uid}: {e}")
 		except Exception as e:
 			log_error("employees", f"{uid}: {e}")
 
@@ -350,6 +363,46 @@ def import_employees(tables, company):
 
 	frappe.db.commit()
 	return legacy_map
+
+
+# ---------- addresses (standalone, idempotent) ----------
+
+def import_addresses(tables, legacy_map):
+	address_by_user = {r["userId"]: r for r in tables.get("address", [])}
+	name_by_user = {
+		r["userId"]: " ".join(p for p in [clean(r.get("firstName")), clean(r.get("middleName")), clean(r.get("lastName"))] if p)
+		for r in tables.get("user", [])
+	}
+
+	for uid, emp_name in legacy_map.items():
+		addr = address_by_user.get(uid)
+		if not addr or not (clean(addr.get("line1")) or clean(addr.get("city"))):
+			continue
+		already = frappe.db.sql(
+			"""select 1 from `tabDynamic Link` where link_doctype='Employee' and link_name=%s
+			   and parenttype='Address' limit 1""",
+			emp_name,
+		)
+		if already:
+			bump("addresses", "skipped")
+			continue
+		try:
+			a = frappe.new_doc("Address")
+			a.address_title = name_by_user.get(uid) or emp_name
+			a.address_type = "Current"
+			a.address_line1 = clean(addr.get("line1")) or "NA"
+			a.address_line2 = clean(addr.get("line2"))
+			a.city = clean(addr.get("city")) or "NA"
+			a.state = clean(addr.get("state"))
+			a.pincode = clean(addr.get("pincode"))
+			a.country = clean(addr.get("country")) or "India"
+			a.append("links", {"link_doctype": "Employee", "link_name": emp_name})
+			a.flags.ignore_mandatory = True
+			a.insert(ignore_permissions=True)
+			bump("addresses")
+		except Exception as e:
+			log_error("addresses", f"{uid}: {e}")
+	frappe.db.commit()
 
 
 # ---------- holidays ----------
@@ -642,16 +695,21 @@ def import_expenses(tables, legacy_map, company):
 
 def import_assets(tables, legacy_map):
 	for row in tables.get("assets", []):
+		legacy_id = row.get("id")
+		if legacy_id and frappe.db.exists("Legacy Asset", {"custom_legacy_asset_id": legacy_id}):
+			bump("assets", "skipped")
+			continue
 		try:
 			emp_name = legacy_map.get(row.get("userId"))
 			a = frappe.new_doc("Legacy Asset")
+			a.custom_legacy_asset_id = legacy_id
 			a.category = clean(row.get("category"))
 			a.asset_name = clean(row.get("name"))
 			a.model = clean(row.get("model"))
 			a.description = clean(row.get("description"))
 			a.status = clean(row.get("status")) or "Active"
 			a.serial_no = clean(row.get("serialno"))
-			a.owned_by = clean(row.get("ownedby"))
+			a.owned_by = normalize_deployed_at(row.get("ownedby"))
 			a.warranty = clean(row.get("warranty"))
 			a.legacy_image_filenames = clean(row.get("imagesurl"))
 			if emp_name:
@@ -792,6 +850,7 @@ def run(data_path, company, default_password):
 	tables = load_tables(data_path)
 	setup(company)
 	legacy_map = import_employees(tables, company)
+	import_addresses(tables, legacy_map)
 	import_holidays(tables, company)
 	import_leave_allocations(tables, legacy_map)
 	import_leave_applications(tables, legacy_map, company)
@@ -801,6 +860,24 @@ def run(data_path, company, default_password):
 	import_assets(tables, legacy_map)
 	role_id_to_name = import_roles_and_permissions(tables)
 	import_users_and_role_assignments(tables, legacy_map, role_id_to_name, default_password)
+
+	print("=====MIGRATION_REPORT_START=====")
+	print(json.dumps(REPORT, indent=2, default=str))
+	print("=====MIGRATION_REPORT_END=====")
+
+
+def build_legacy_map():
+	rows = frappe.get_all("Employee", filters={"custom_legacy_user_id": ["!=", ""]}, fields=["name", "custom_legacy_user_id"])
+	return {r.custom_legacy_user_id: r.name for r in rows}
+
+
+def run_addresses_and_assets(data_path):
+	"""Resume just the two phases that had bugs on first run (addresses, assets) - idempotent."""
+	tables = load_tables(data_path)
+	setup(next(iter(frappe.get_all("Company", pluck="name")), None))
+	legacy_map = build_legacy_map()
+	import_addresses(tables, legacy_map)
+	import_assets(tables, legacy_map)
 
 	print("=====MIGRATION_REPORT_START=====")
 	print(json.dumps(REPORT, indent=2, default=str))
