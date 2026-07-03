@@ -1,4 +1,12 @@
 #!bin/bash
+set -euo pipefail
+
+SITE_NAME="${SITE_NAME:-hrms.localhost}"
+HRMS_APP_SOURCE="${HRMS_APP_SOURCE:-hrms}"
+HRMS_APP_BRANCH="${HRMS_APP_BRANCH:-}"
+: "${MARIADB_ROOT_PASSWORD:?MARIADB_ROOT_PASSWORD must be set (see .env)}"
+: "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set (see .env)}"
+DEVELOPER_MODE="${DEVELOPER_MODE:-0}"
 
 if [ -d "/home/frappe/frappe-bench/apps/frappe" ]; then
     echo "Bench already exists, skipping init"
@@ -25,18 +33,22 @@ sed -i '/redis/d' ./Procfile
 sed -i '/watch/d' ./Procfile
 
 bench get-app erpnext
-bench get-app hrms
+if [ -n "$HRMS_APP_BRANCH" ]; then
+    bench get-app "$HRMS_APP_SOURCE" --branch "$HRMS_APP_BRANCH"
+else
+    bench get-app "$HRMS_APP_SOURCE"
+fi
 
-bench new-site hrms.localhost \
+bench new-site "$SITE_NAME" \
 --force \
---mariadb-root-password 123 \
---admin-password admin \
+--mariadb-root-password "$MARIADB_ROOT_PASSWORD" \
+--admin-password "$ADMIN_PASSWORD" \
 --no-mariadb-socket
 
-bench --site hrms.localhost install-app hrms
-bench --site hrms.localhost set-config developer_mode 1
-bench --site hrms.localhost enable-scheduler
-bench --site hrms.localhost clear-cache
-bench use hrms.localhost
+bench --site "$SITE_NAME" install-app hrms
+bench --site "$SITE_NAME" set-config developer_mode "$DEVELOPER_MODE"
+bench --site "$SITE_NAME" enable-scheduler
+bench --site "$SITE_NAME" clear-cache
+bench use "$SITE_NAME"
 
 bench start

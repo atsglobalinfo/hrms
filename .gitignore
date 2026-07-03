@@ -24,3 +24,6 @@ hrms/www/roster.html
 # legacy ATS HRMS data export - one-time migration input, contains customer PII, never commit
 atsglofj_hrms.json
 legacy_data.json
+
+# real secrets - copy docker/.env.example to docker/.env and fill in, never commit .env itself
+docker/.env

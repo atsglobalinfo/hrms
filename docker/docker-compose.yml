@@ -1,4 +1,3 @@
-version: "3.8" # Updated version
 services:
   mariadb:
     image: mariadb:10.8
@@ -8,24 +7,33 @@ services:
       - --skip-character-set-client-handshake
       - --skip-innodb-read-only-compressed # Temporary fix for MariaDB 10.6
     environment:
-      MYSQL_ROOT_PASSWORD: 123
+      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in .env}
     volumes:
       - mariadb-data:/var/lib/mysql
+    restart: unless-stopped
 
   redis:
     image: redis:alpine
+    restart: unless-stopped
 
   frappe:
     image: frappe/bench:latest
     command: bash /workspace/init.sh
     environment:
       - SHELL=/bin/bash
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in .env}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      - DEVELOPER_MODE=${DEVELOPER_MODE:-0}
+      - SITE_NAME=${SITE_NAME:-hrms.localhost}
+      - HRMS_APP_SOURCE=${HRMS_APP_SOURCE:-hrms}
+      - HRMS_APP_BRANCH=${HRMS_APP_BRANCH:-}
     working_dir: /home/frappe
     volumes:
       - .:/workspace
     ports:
-      - 8000:8000
-      - 9000:9000
+      - 127.0.0.1:8000:8000
+      - 127.0.0.1:9000:9000
+    restart: unless-stopped
 
 volumes:
   mariadb-data:
