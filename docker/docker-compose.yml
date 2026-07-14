@@ -35,5 +35,22 @@ services:
       - 127.0.0.1:9000:9000
     restart: unless-stopped
 
+  essl-receiver:
+    build:
+      context: ../essl_sync
+      dockerfile: Dockerfile
+    environment:
+      - FRAPPE_URL=http://frappe:8000
+      - API_KEY=${ESSL_API_KEY}
+      - API_SECRET=${ESSL_API_SECRET}
+      - DEVICE_ID=${ESSL_DEVICE_ID:-eSSL-x2008}
+      - IN_DEVICE_SN=${ESSL_IN_DEVICE_SN:-}
+      - OUT_DEVICE_SN=${ESSL_OUT_DEVICE_SN:-}
+    ports:
+      - "80:80"
+    depends_on:
+      - frappe
+    restart: unless-stopped
+
 volumes:
   mariadb-data:
