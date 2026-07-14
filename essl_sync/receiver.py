@@ -28,7 +28,7 @@ IN_DEVICE_SN = os.getenv('IN_DEVICE_SN', '')   # e.g. '6426144200014'
 OUT_DEVICE_SN = os.getenv('OUT_DEVICE_SN', '')  # e.g. '6426144200099'
 
 # For logging
-LOG_FILE = '/home/izhaar/hrms/essl_sync/essl_sync.log'
+LOG_FILE = os.getenv('LOG_FILE', '/tmp/essl_sync.log')
 
 def log_message(msg):
     """Log message with timestamp"""
