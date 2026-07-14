@@ -47,7 +47,7 @@ services:
       - IN_DEVICE_SN=${ESSL_IN_DEVICE_SN:-}
       - OUT_DEVICE_SN=${ESSL_OUT_DEVICE_SN:-}
     ports:
-      - "9090:80"
+      - "9091:80"
     depends_on:
       - frappe
     restart: unless-stopped
